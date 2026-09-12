@@ -17,7 +17,17 @@ Start with the module that owns the behavior being changed.
 | Home-timezone display formatting | `src/components/timeline/format.ts` |
 | Visibility, search matching, story selection, badge counts | `src/lib/query.ts` |
 | Normalization, noise reduction, story rules | `src/lib/engine.ts` |
+| Domain types and API snapshot shape | `src/lib/types.ts` |
+| Home-timezone period boundaries | `src/lib/time.ts` |
+| Summary derivation from current home state | `src/lib/home-summary.ts` |
+| Home Assistant transport, metadata, history ingestion | `src/server/adapter.ts` |
 | Connection lifecycle, history, evidence access | `src/server/runtime-core.ts` |
+| Server-only entry point and development runtime reuse | `src/server/runtime.ts`, `src/server/shared-runtime.ts` |
+| Bounded observation retention and eviction | `src/server/store.ts` |
+| Payload sanitization and URL/Host/Origin validation | `src/lib/security.ts` |
+| Request guards, query parsing, JSON responses | `src/server/http.ts` |
+| HTTP endpoints and SSE transport | `src/app/api/` |
+| Theme tokens, feature styling, responsive rules | `src/app/globals.css` |
 
 ## State ownership
 
@@ -34,7 +44,7 @@ modules directly rather than through a barrel file.
 
 ## Verification
 
-Run `npm test`, `npm run typecheck`, and `npm run build`. For UI changes, also
-check story expansion, event-to-entity navigation, search/filter controls, and
-settings in the browser. Connection submission must never log or persist tokens.
-Use the local Home Assistant fixture for connection tests.
+Follow [development verification](development.md#verification-and-completion),
+including the linked browser checks for UI changes and the README fixture for
+connection tests. Review [Security](../README.md#security) when a change crosses
+the browser/server or Home Assistant boundary.

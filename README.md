@@ -2,6 +2,15 @@
 
 A local, read-only activity journal for Home Assistant. An editorial timeline, live moments, deterministic stories, and progressively disclosed technical evidence.
 
+## Project guides
+
+- [Development](docs/development.md): simple branching, code practices, and completion checks.
+- [UI design](docs/ui-design.md): visual direction, interaction, accessibility, and browser checks.
+- [Tech stack](docs/tech-stack.md): dependencies, runtime assumptions, and data lifecycle.
+- [Architecture](docs/architecture.md): module ownership and state boundaries.
+- [Security](#security): current protections and rules for sensitive changes.
+- [Agent entry point](AGENTS.md): task-specific guidance for coding agents.
+
 ## Run
 
 Requires Node.js 20.19+ and npm.
@@ -81,12 +90,37 @@ Story grouping is a timing heuristic, not proof of causality. The inspector dist
 
 ## Security
 
+### Current model
+
 - Localhost Host/Origin checks on every application API; fixed routes rather than an arbitrary authenticated proxy.
 - HTTP/HTTPS Home Assistant URLs only; embedded credentials, query strings, and fragments rejected. Redirects are disabled; TLS certificate verification stays enabled.
 - Credentials never enter client bundles, browser storage, returned connection settings, or application logging. No analytics or external error reporting.
 - Home Assistant state attributes are allowlisted; camera URLs, access tokens, nested payloads, and unrelated fields are omitted. The configured token is also redacted from upstream payloads.
 - Requests have timeouts and response-size bounds. Secrets and observations are cleared on disconnect. The process does not persist home activity to disk.
 - This MVP has no user authentication and should remain bound to localhost.
+
+The local user and machine are trusted. Host/Origin checks are browser-request
+protections, not user authentication or isolation from other local processes.
+The read-only restriction is application behavior; do not assume the supplied
+Home Assistant token itself has read-only permissions. The configured upstream
+URL can reach private-network services by design.
+
+### When changing sensitive code
+
+- Route new application API handlers through `guard` in `src/server/http.ts` and use its `json` response helper where applicable. Preserve no-store behavior for home data and the dedicated SSE response headers.
+- Keep upstream access fixed to required Home Assistant operations. Preserve URL validation, redirect rejection, TLS verification, sanitization, and resource bounds when extending the adapter.
+- Keep credentials behind the server boundary and clear transient form input. Render upstream strings as text; home names and state attributes are untrusted content.
+- Use synthetic tokens and fake home data in tests, screenshots, issues, and logs. Entity names, presence, and activity history are private even after token redaction. Check diffs for accidental data or secret inclusion.
+- Verify changes to these boundaries with `tests/security.test.ts` and `tests/adapter.test.ts`, plus runtime tests for session cleanup. Add a regression case for a newly handled threat or failure.
+- Treat LAN/public access, device control, analytics, or persistent home-data storage as explicit scope changes requiring a revised security design before implementation.
+
+### If a token is exposed
+
+Revoke it in Home Assistant, create a replacement, and update the local connection
+or `.env.local`. Remove exposed copies from the affected artifacts; removing a
+token from the latest commit alone does not revoke it or erase earlier copies.
+Report a reproducible security issue with fake data and sanitized steps, keeping
+credentials and real home activity out of public issues.
 
 ## Verification
 
