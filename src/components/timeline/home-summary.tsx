@@ -88,19 +88,34 @@ export function HomeSummary({
           className="temperature-summary"
           aria-label="Home temperature range"
         >
-          <span>
-            <span>Home temperature</span>
-          </span>
           {temperatureRange ? (
-            <span
-              title={`${temperatureRange.sensors} indoor readings across ${temperatureRange.rooms} rooms · ${temperatureRange.unit}`}
-            >
-              <strong>
-                {formatTemperature(temperatureRange.min)}° –{" "}
-                {formatTemperature(temperatureRange.max)}°
+            <>
+              <strong
+                title={`Indoor temperature · ${temperatureRange.sensors} readings across ${temperatureRange.rooms} rooms`}
+              >
+                {formatTemperature(temperatureRange.min)}
+                {temperatureRange.min !== temperatureRange.max && (
+                  <>°–{formatTemperature(temperatureRange.max)}</>
+                )}
+                {temperatureRange.unit}
               </strong>
-              <span>{temperatureRange.unit}</span>
-            </span>
+              <span className="temperature-rooms">
+                <span title={`Coolest: ${temperatureRange.coolestRoom.name}`}>
+                  {temperatureRange.coolestRoom.name}
+                </span>
+                {temperatureRange.coolestRoom.id !==
+                  temperatureRange.warmestRoom.id && (
+                  <>
+                    <span aria-label="to">→</span>
+                    <span
+                      title={`Warmest: ${temperatureRange.warmestRoom.name}`}
+                    >
+                      {temperatureRange.warmestRoom.name}
+                    </span>
+                  </>
+                )}
+              </span>
+            </>
           ) : (
             <span>No room readings</span>
           )}

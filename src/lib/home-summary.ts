@@ -49,14 +49,18 @@ export function homeTemperatureRange(states: HAState[], metadata: Metadata) {
         : preferred === "°C"
           ? ((value - 32) * 5) / 9
           : (value * 9) / 5 + 32;
-    return [{ value: converted, room: metadata[s.entity_id].room!.id }];
+    return [{ value: converted, room: metadata[s.entity_id].room! }];
   });
   if (!readings.length) return null;
+  const coolest = readings.reduce((a, b) => (b.value < a.value ? b : a));
+  const warmest = readings.reduce((a, b) => (b.value > a.value ? b : a));
   return {
-    min: Math.min(...readings.map((r) => r.value)),
-    max: Math.max(...readings.map((r) => r.value)),
+    min: coolest.value,
+    max: warmest.value,
+    coolestRoom: coolest.room,
+    warmestRoom: warmest.room,
     unit: preferred,
-    rooms: new Set(readings.map((r) => r.room)).size,
+    rooms: new Set(readings.map((r) => r.room.id)).size,
     sensors: readings.length,
   };
 }

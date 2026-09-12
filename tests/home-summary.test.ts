@@ -30,6 +30,8 @@ test("range uses real indoor measurements, excluding thresholds, soil, outdoor, 
   assert.deepEqual(homeTemperatureRange(states, metadata), {
     min: 18,
     max: 25,
+    coolestRoom: { id: "room", name: "Room" },
+    warmestRoom: { id: "room", name: "Room" },
     unit: "°C",
     rooms: 1,
     sensors: 2,
@@ -51,4 +53,21 @@ test("mixed units convert, invalid readings do not produce NaN or zero", () => {
   assert.equal(homeTemperatureRange(states, metadata)?.max, 25);
   assert.equal(homeTemperatureRange(states, metadata)?.min, 20);
   assert.equal(homeTemperatureRange([], {}), null);
+});
+
+test("room labels follow temperature extremes after unit conversion", () => {
+  const metadata: Metadata = {
+    "sensor.bedroom": { name: "Bedroom", room: { id: "bed", name: "Bedroom" } },
+    "sensor.living": {
+      name: "Living",
+      room: { id: "living", name: "Living room" },
+    },
+  };
+  const result = homeTemperatureRange(
+    [state("sensor.living", "22"), state("sensor.bedroom", "68", "°F")],
+    metadata,
+  );
+  assert.equal(result?.coolestRoom.name, "Bedroom");
+  assert.equal(result?.warmestRoom.name, "Living room");
+  assert.equal(result?.rooms, 2);
 });
