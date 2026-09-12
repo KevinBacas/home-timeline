@@ -1,0 +1,117 @@
+# Home Timeline
+
+A local, read-only activity journal for Home Assistant. An editorial timeline, live moments, deterministic stories, and progressively disclosed technical evidence.
+
+## Run
+
+Requires Node.js 20.19+ and npm.
+
+```bash
+npm install
+npm run dev
+```
+
+Open **http://127.0.0.1:3000**. The first launch is a labeled demo home, with simulated motion every 45 seconds while the page is visible. “New moment” inserts an event immediately on desktop.
+
+For a production build:
+
+```bash
+npm run build
+npm start
+```
+
+Both commands serve the app on **127.0.0.1 only**. Tablet/mobile layouts are implemented, but remote/LAN access is intentionally not enabled.
+
+## Connect your home
+
+Choose **Connect your home**, enter the Home Assistant URL, and paste a long-lived access token created in Home Assistant → your profile → Security. No custom integration is required. Your server must be able to reach that URL.
+
+The token remains in local server memory until disconnect or restart. The browser clears the password field after submission and never stores the token. Demo events are replaced when connected.
+
+For persistence, copy `.env.example` to `.env.local` and set:
+
+```dotenv
+HA_URL=http://homeassistant.local:8123
+HA_TOKEN=your-long-lived-access-token
+```
+
+`.env.local` is ignored by Git. Environment settings take precedence over onboarding. Disconnect clears the active session; an environment-managed connection resumes after server restart. Do not prefix either variable with `NEXT_PUBLIC_`.
+
+## Explore
+
+- **Live / History**: Today, Yesterday, Last 24 hours, or a custom range of up to 31 days. Calendar boundaries use the home's timezone.
+- **Search**: click the search button or press ⌘K / Ctrl+K. Match titles, rooms, friendly names, entity IDs, people, and device names in the selected period.
+- **Filters**: room, person, and category filters become removable pills. Stories retain matching events in context.
+- **Stories**: arrival, movie time, and repeated room activity use deterministic timing rules. Expanding reveals individual events in chronological order.
+- **Event inspector**: click an event for state and attribute differences, available context relationships, and sanitized source evidence. Click its entity to inspect history.
+- **Settings**: choose a theme, enable Debug mode, inspect activity counts, or exclude entities/domains. Preferences stay in this browser.
+- **Live updates**: while reading older activity, the timeline holds its position and offers a “Back to now” button.
+
+## Architecture
+
+See [the module map](docs/architecture.md) for feature ownership and where to make changes.
+
+```text
+Home Assistant REST + WebSocket
+        ↓
+server/adapter.ts — validation, sanitization, metadata, history
+        ↓
+lib/engine.ts — semantic events, noise rules, context links, stories
+        ↓
+server/runtime-core.ts + store.ts — session, reconnect, bounded cache
+        ↓
+local HTTP queries + SSE invalidation/replay
+        ↓
+React timeline, filters, and inspector
+```
+
+The persistent Node process shares one Home Assistant connection across tabs. `runtime.ts` enforces the server-only import boundary and reuses the runtime across development module reloads. State transitions and automation events are subscribed before loading the current snapshot. History loads in entity batches and six-hour slices, with at most two history requests in flight per adapter. Live evidence wins when history overlaps.
+
+The normalized model keeps observations, semantic events, references, source provenance, and grouping rules separate from presentation. Search runs server-side over the loaded period before pagination. Pages contain up to 2,000 events plus story-boundary context; the interface initially renders 80 timeline items. The observation cache has a 128MB conservative accounting budget and evicts suppressed technical noise before meaningful events. Cache eviction does not trigger repeated history imports. SSE retains 256 small invalidations and requests resynchronization for expired cursors. Browser reconnection queries current data rather than treating notifications as a durable event log.
+
+## Interpretation and limits
+
+Supported interpretation includes doors/windows, locks/alarms, lights and meaningful brightness changes, person presence, motion/occupancy, climate mode/action/target changes, media playback, automation starts, and sustained device unavailability.
+
+Motion clearing, sensor measurements, playback-position changes, and insignificant brightness updates are hidden normally. Debug mode reveals retained technical observations. Brief availability interruptions are suppressed. Room motion is never attributed to a person without person evidence.
+
+History depends on Home Assistant's recorder, retention, entity exclusions, and permissions. Missing history is not proof that nothing happened. State history can be backfilled after a disconnect; missing non-state events and complete historical causality cannot always be reconstructed. Metadata refreshes every five minutes and on reconnect. Historical events use currently available entity/room names.
+
+Story grouping is a timing heuristic, not proof of causality. The inspector distinguishes matching automation contexts, other related activity, and unavailable causes. Full automation traces, AI, anomaly detection, persistent event storage, dedicated room/person pages, camera content, device control, and cloud/LAN hosting are not included.
+
+## Security
+
+- Localhost Host/Origin checks on every application API; fixed routes rather than an arbitrary authenticated proxy.
+- HTTP/HTTPS Home Assistant URLs only; embedded credentials, query strings, and fragments rejected. Redirects are disabled; TLS certificate verification stays enabled.
+- Credentials never enter client bundles, browser storage, returned connection settings, or application logging. No analytics or external error reporting.
+- Home Assistant state attributes are allowlisted; camera URLs, access tokens, nested payloads, and unrelated fields are omitted. The configured token is also redacted from upstream payloads.
+- Requests have timeouts and response-size bounds. Secrets and observations are cleared on disconnect. The process does not persist home activity to disk.
+- This MVP has no user authentication and should remain bound to localhost.
+
+## Verification
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+Tests cover interpretation, grouping, source deduplication, history baselines, DST, cache limits, token sanitization, URL/origin checks, registry permission fallback, malformed states, initial subscription ordering, reconnect, SSE replay, and contextual search.
+
+A disposable simulator is included for manual end-to-end testing:
+
+```bash
+node --import tsx tests/fixture-ha.ts
+```
+
+Connect to `http://127.0.0.1:8124` with `fixture-only-token`. It uses fake entities and periodically toggles a fake lock; it never contacts a real home. Stop it with Ctrl+C.
+
+Implementation was verified against fixtures, browser interactions, and a real Home Assistant instance with 527 entities. Regression coverage includes high-volume sensor history, useful-event retention under cache pressure, and development runtime refresh. Device-specific payloads and recorder policies may still require interpretation refinements.
+
+## Official API references
+
+- https://developers.home-assistant.io/docs/api/rest/
+- https://developers.home-assistant.io/docs/api/websocket/
+- https://www.home-assistant.io/docs/configuration/state_object/
+- https://www.home-assistant.io/integrations/recorder/
+- Registry and trace capability implementations: https://github.com/home-assistant/core
