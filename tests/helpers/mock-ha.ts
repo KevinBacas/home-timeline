@@ -13,7 +13,11 @@ const state = {
   last_updated: "2026-09-11T12:00:00.000Z",
 };
 export async function fixture(
-  options: { denyRegistries?: boolean; malformedStates?: boolean } = {},
+  options: {
+    denyRegistries?: boolean;
+    malformedStates?: boolean;
+    failHistory?: boolean;
+  } = {},
 ) {
   const received: string[] = [];
   const server = createServer((req, res) => {
@@ -31,7 +35,10 @@ export async function fixture(
           time_zone: "Europe/Paris",
         }),
       );
-    else if (req.url?.startsWith("/api/history"))
+    else if (req.url?.startsWith("/api/history") && options.failHistory) {
+      res.writeHead(503);
+      res.end("{}");
+    } else if (req.url?.startsWith("/api/history"))
       res.end(
         JSON.stringify([
           [

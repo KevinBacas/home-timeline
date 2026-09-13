@@ -1,7 +1,7 @@
 import { HomeRuntime } from "./runtime-core";
 // Change this only when constructor state changes incompatibly. Ordinary hot
 // reloads refresh methods while preserving the established HA connection.
-const runtimeVersion = 3;
+const runtimeVersion = 4;
 type RuntimeHost = {
   __homeTimelineRuntime?: HomeRuntime;
   __homeTimelineRuntimeVersion?: number;

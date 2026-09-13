@@ -5,7 +5,8 @@ Start with the module that owns the behavior being changed.
 | Change | Module |
 | --- | --- |
 | Screen composition, selected period/filters, demo lifecycle | `src/components/home-timeline.tsx` |
-| Refresh arbitration, pagination, deferred live updates | `src/client/timeline-feed.ts` |
+| Reading-position preservation, pagination, deferred updates | `src/client/timeline-feed.ts` |
+| Request keys, polling policy, cancellation, browser cache | `src/client/home-queries.ts` |
 | Timeline rows, story expansion, event animations | `src/components/timeline/timeline-list.tsx` |
 | Event evidence and entity-history loading | `src/components/timeline/event-inspector.tsx` |
 | Connection form, transient credentials, submission states | `src/components/timeline/connect-home-dialog.tsx` |
@@ -38,8 +39,9 @@ and entity-history requests. The connection dialog mounts per session so closing
 it discards transient input. The inspector mounts per selected event and cancels
 outdated history responses on cleanup.
 
-Domain interpretation belongs in the engine, not the renderer. Feed request
-coordination belongs in the client feed module, not individual dialogs. Import
+Domain interpretation belongs in the engine, not the renderer. Request caching
+and refresh policy belong in the client query module. The feed module preserves
+reading position and loaded pages; dialogs use shared query options. Import
 modules directly rather than through a barrel file.
 
 ## Verification

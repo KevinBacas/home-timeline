@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { entityHistoryOptions } from "@/client/home-queries";
 
 import {
   ArrowRight,
@@ -29,34 +31,23 @@ export function EventInspector({
 }) {
   const [selected, setSelected] = useState(event);
   const [entityView, setEntityView] = useState(false);
-  const [entityHistory, setEntityHistory] = useState<TimelineEvent[]>([]);
+  const demo = data?.connection.mode === "demo";
+  const history = useQuery({
+    ...entityHistoryOptions(
+      data?.connection.sessionId || "",
+      selected.entityId,
+      range,
+    ),
+    enabled: entityView && !demo && !!data?.connection.sessionId,
+  });
+  const entityHistory = demo
+    ? data.events.filter((e) => e.entityId === selected.entityId)
+    : history.data?.events || [];
   const { time, day } = timelineFormat(data?.connection.timezone);
   const inspect = (value: TimelineEvent) => {
     setSelected(value);
     setEntityView(false);
-    setEntityHistory([]);
   };
-  useEffect(() => {
-    if (!entityView || !selected) return;
-    if (data?.connection.mode === "demo") {
-      setEntityHistory(
-        data.events.filter((e) => e.entityId === selected.entityId),
-      );
-      return;
-    }
-    let active = true;
-    fetch(
-      `/api/entities/${encodeURIComponent(selected.entityId)}?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}`,
-    )
-      .then((r) => r.json())
-      .then((x) => {
-        if (active) setEntityHistory(x.events || []);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [entityView, selected, data?.connection.mode, range.start, range.end]);
   return (
     <Modal
       wide
@@ -112,23 +103,32 @@ export function EventInspector({
           </button>
           {entityView ? (
             <div className="entity-history">
-              {entityHistory.length ? (
-                entityHistory
-                  .slice()
-                  .reverse()
-                  .map((e) => (
-                    <button key={e.id} onClick={() => inspect(e)}>
-                      <span>{time(e.timestamp)}</span>
-                      <strong>
-                        {e.suppressed
-                          ? `${e.observation.previous?.state || "—"} → ${e.observation.current?.state || "—"}`
-                          : e.title}
-                      </strong>
-                    </button>
-                  ))
-              ) : (
-                <p>No retained history for this entity.</p>
+              {!demo && history.isPending && <p>Loading entity history…</p>}
+              {!demo && history.isError && (
+                <p role="alert">
+                  Entity history could not be loaded.{" "}
+                  <button onClick={() => void history.refetch()}>
+                    Try again
+                  </button>
+                </p>
               )}
+              {entityHistory.length
+                ? entityHistory
+                    .slice()
+                    .reverse()
+                    .map((e) => (
+                      <button key={e.id} onClick={() => inspect(e)}>
+                        <span>{time(e.timestamp)}</span>
+                        <strong>
+                          {e.suppressed
+                            ? `${e.observation.previous?.state || "—"} → ${e.observation.current?.state || "—"}`
+                            : e.title}
+                        </strong>
+                      </button>
+                    ))
+                : (demo || history.isSuccess) && (
+                    <p>No retained history for this entity.</p>
+                  )}
             </div>
           ) : (
             <>

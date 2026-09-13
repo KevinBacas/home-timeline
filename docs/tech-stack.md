@@ -17,7 +17,7 @@ Assistant. The app has no database, hosted backend, or AI service.
 | Time | `date-fns`, `date-fns-tz`, and `Intl` | Home-timezone range calculations and display |
 | External data | Zod | Validate and sanitize Home Assistant payloads and connection input |
 | Home Assistant transport | Native `fetch` and `ws` | REST history/metadata and live WebSocket subscriptions |
-| Browser updates | HTTP queries and `EventSource` | Snapshots plus server-sent invalidation/replay notifications |
+| Browser updates | HTTP queries and `@tanstack/react-query` | Visibility-aware polling, request sharing, cancellation, and in-memory caching |
 | Quality tools | `node:test`, `node:assert/strict`, `tsx`, TypeScript, Prettier | Tests, type checking, and formatting |
 
 Read [package.json](../package.json) for the supported Node version, dependency
@@ -32,7 +32,7 @@ either as an existing quality gate.
 
 - The process shares one Home Assistant session across tabs. `src/server/shared-runtime.ts` also preserves it across compatible development reloads.
 - The adapter loads current state, metadata, and recorder history and subscribes to live events. The engine derives semantic events and stories; the bounded observation store holds retained evidence in memory.
-- SSE messages invalidate browser data and support limited replay. HTTP queries remain the source for refreshed snapshots; the stream is not a durable event log.
+- Status and active timeline queries poll once a minute while visible. Completed past ranges are fresh for ten minutes without polling; connection setup and loading history temporarily poll every two seconds, then return to the minute cadence (or stop for completed past ranges). HTTP responses remain `no-store`; TanStack Query owns the transient in-memory cache. Connection session IDs isolate and clear old home data. The browser no longer opens the legacy SSE stream.
 - Browser local storage holds theme and exclusion preferences. Credentials and home activity are not persisted there. Optional credentials in `.env.local` are server configuration; see [Security](../README.md#security).
 - Disconnect clears the active session and retained observations. Restart loses in-memory history and reconnects from environment settings when configured; available history can be fetched again from Home Assistant.
 

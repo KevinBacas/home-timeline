@@ -379,3 +379,23 @@ test("Live calendar range advances at home midnight across DST", () => {
   assert.ok("2026-03-28T23:00:01.000Z" >= after.start);
   assert.ok("2026-03-28T23:00:01.000Z" < after.end);
 });
+
+test("Today keeps a stable home-day range as polling advances", () => {
+  const early = rangeForPeriod(
+    "Today",
+    "Europe/Paris",
+    "",
+    "",
+    new Date("2026-10-25T08:00:00Z"),
+  );
+  const later = rangeForPeriod(
+    "Today",
+    "Europe/Paris",
+    "",
+    "",
+    new Date("2026-10-25T16:00:00Z"),
+  );
+  assert.deepEqual(early, later);
+  assert.equal(early.start, "2026-10-24T22:00:00.000Z");
+  assert.equal(early.end, "2026-10-25T23:00:00.000Z");
+});

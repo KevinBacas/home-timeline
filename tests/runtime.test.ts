@@ -124,3 +124,75 @@ test("noise is removed before pagination, so useful activity cannot be crowded o
     await f.close();
   }
 });
+
+test("completed past imports survive cache TTL, remain distinct by endpoint, and can be forced", async (t) => {
+  const f = await fixture();
+  const home = new HomeRuntime();
+  try {
+    await home.connect(f.url, secret);
+    await until(() => home.connection.history === "ready");
+    const start = "2020-01-01T00:00:00Z";
+    const end = "2020-01-01T00:10:00Z";
+    await home.ensureHistory(start, end);
+    const before = f.received.filter((url) =>
+      url.startsWith("/api/history"),
+    ).length;
+    const now = Date.now();
+    t.mock.method(Date, "now", () => now + 6 * 60_000);
+    await home.ensureHistory(start, end);
+    assert.equal(
+      f.received.filter((url) => url.startsWith("/api/history")).length,
+      before,
+    );
+    await home.ensureHistory(start, "2020-01-01T00:50:00Z");
+    assert.equal(
+      f.received.filter((url) => url.startsWith("/api/history")).length,
+      before + 1,
+    );
+    await home.ensureHistory(start, end, true);
+    assert.equal(
+      f.received.filter((url) => url.startsWith("/api/history")).length,
+      before + 2,
+    );
+    const session = home.status().connection.sessionId;
+    assert.ok(session);
+    home.disconnect();
+    assert.notEqual(home.status().connection.sessionId, session);
+    assert.deepEqual(home.status().states, []);
+  } finally {
+    home.disconnect();
+    await f.close();
+  }
+});
+
+test("failed historical imports retry after five minutes instead of becoming permanent", async (t) => {
+  const options = { failHistory: true };
+  const f = await fixture(options);
+  const home = new HomeRuntime();
+  try {
+    await home.connect(f.url, secret);
+    const start = "2020-01-01T00:00:00Z";
+    const end = "2020-01-01T01:00:00Z";
+    await home.ensureHistory(start, end);
+    assert.notEqual(home.connection.history, "ready");
+    const before = f.received.filter((url) =>
+      url.includes("2020-01-01"),
+    ).length;
+    options.failHistory = false;
+    await home.ensureHistory(start, end);
+    assert.equal(
+      f.received.filter((url) => url.includes("2020-01-01")).length,
+      before,
+    );
+    const now = Date.now();
+    t.mock.method(Date, "now", () => now + 6 * 60_000);
+    await home.ensureHistory(start, end);
+    assert.ok(
+      f.received.filter((url) => url.includes("2020-01-01")).length > before,
+    );
+    assert.equal(home.connection.history, "ready");
+  } finally {
+    home.disconnect();
+    await f.close();
+  }
+});

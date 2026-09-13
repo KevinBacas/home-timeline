@@ -30,7 +30,7 @@ export function rangeForPeriod(
   return {
     start: from.toISOString(),
     end:
-      period === "Live"
+      period === "Live" || period === "Today"
         ? fromZonedTime(`${shift(date, 1)}T00:00:00`, zone).toISOString()
         : to.toISOString(),
   };

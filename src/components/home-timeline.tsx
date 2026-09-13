@@ -9,9 +9,19 @@ import { ConnectHomeDialog } from "./timeline/connect-home-dialog";
 import { EventInspector } from "./timeline/event-inspector";
 import { TimelineList } from "./timeline/timeline-list";
 import { createTimelineFeed } from "@/client/timeline-feed";
+import {
+  createHomeQueryClient,
+  statusOptions,
+  timelineOptions,
+} from "@/client/home-queries";
+import {
+  QueryClientProvider,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import { selectTimeline, countNewVisibleEvents } from "@/lib/query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { motion, MotionConfig } from "motion/react";
 import {
@@ -26,6 +36,7 @@ import {
   LockKeyhole,
   Moon,
   Plus,
+  RefreshCw,
   Search,
   Settings2,
   Sparkles,
@@ -37,6 +48,18 @@ import { normalize, observationId } from "@/lib/engine";
 import { type Category, type Snapshot, type TimelineEvent } from "@/lib/types";
 import { rangeForPeriod } from "@/lib/time";
 export default function HomeTimeline() {
+  const [client] = useState(createHomeQueryClient);
+  return (
+    <QueryClientProvider client={client}>
+      <HomeTimelineScreen />
+    </QueryClientProvider>
+  );
+}
+
+function HomeTimelineScreen() {
+  const queryClient = useQueryClient();
+  const [visible, setVisible] = useState(false);
+  const status = useQuery({ ...statusOptions(), enabled: visible });
   const [data, setData] = useState<Snapshot | null>(null),
     [period, setPeriod] = useState("Live"),
     [search, setSearch] = useState(""),
@@ -54,24 +77,27 @@ export default function HomeTimeline() {
   const [excluded, setExcluded] = useState<string[]>([]),
     [domains, setDomains] = useState<string[]>([]),
     [pending, setPending] = useState(0),
-    [busy, setBusy] = useState(false),
     [limit, setLimit] = useState(80),
     [clock, setClock] = useState(new Date(0));
   const pendingData = useRef<Snapshot | null>(null);
-  const source = useRef<EventSource | null>(null);
   const dataRef = useRef(data);
   dataRef.current = data;
   const periodRef = useRef(period);
   periodRef.current = period;
+  const homeTimezone =
+    status.data?.connection.mode === "demo"
+      ? data?.connection.timezone
+      : status.data?.connection.timezone;
   const homeDay = clock.getTime()
     ? new Intl.DateTimeFormat("en-CA", {
-        timeZone: data?.connection.timezone || "UTC",
+        timeZone: homeTimezone || "UTC",
       }).format(clock)
     : "";
+  const rollingMinute =
+    period === "Last 24 hours" ? Math.floor(clock.getTime() / 60000) : 0;
   const range = useMemo(
-    () =>
-      rangeForPeriod(period, data?.connection.timezone, customStart, customEnd),
-    [period, data?.connection.timezone, customStart, customEnd, homeDay],
+    () => rangeForPeriod(period, homeTimezone, customStart, customEnd),
+    [period, homeTimezone, customStart, customEnd, homeDay, rollingMinute],
   );
   const filtersQuery = new URLSearchParams({
     q: search,
@@ -81,7 +107,11 @@ export default function HomeTimeline() {
     debug: String(debug),
   }).toString();
   const filtersRef = useRef(filtersQuery);
-  filtersRef.current = filtersQuery;
+  const [debouncedFilters, setDebouncedFilters] = useState(filtersQuery);
+  filtersRef.current = debouncedFilters;
+  const session = status.data?.connection.sessionId || "";
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
   const viewRef = useRef({
     ...range,
     search,
@@ -104,6 +134,18 @@ export default function HomeTimeline() {
   };
   const rangeRef = useRef(range);
   rangeRef.current = range;
+  const url = `/api/timeline?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}&${debouncedFilters}`;
+  const past =
+    Date.parse(range.end) <=
+    Date.parse(rangeForPeriod("Live", homeTimezone).start);
+  const pastRef = useRef(past);
+  pastRef.current = past;
+  const timeline = useQuery({
+    ...timelineOptions(session, url, past),
+    enabled:
+      visible && !!session && status.data?.connection.mode === "connected",
+  });
+  const busy = timeline.isFetching;
   const feed = useRef<ReturnType<typeof createTimelineFeed> | null>(null);
   if (!feed.current)
     feed.current = createTimelineFeed({
@@ -113,20 +155,17 @@ export default function HomeTimeline() {
         snapshot: dataRef.current,
         reading: window.scrollY > 280 && periodRef.current === "Live",
       }),
-      fetch: async (url) => {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error("Timeline unavailable");
-        return response.json();
-      },
+      fetch: (url) =>
+        queryClient.fetchQuery(
+          timelineOptions(sessionRef.current, url, pastRef.current),
+        ),
       commit: ({ snapshot, pending: next, count }) => {
         dataRef.current = snapshot;
         setData(snapshot);
         pendingData.current = next;
         setPending(count);
       },
-      demo: createDemo,
     });
-  const load = useCallback((force = false) => feed.current!.refresh(force), []);
   useEffect(() => {
     setData(createDemo());
     setClock(new Date());
@@ -135,33 +174,82 @@ export default function HomeTimeline() {
       setExcluded(JSON.parse(localStorage.getItem("ht-excluded") || "[]"));
       setDomains(JSON.parse(localStorage.getItem("ht-domains") || "[]"));
     } catch {}
-    void load(true);
-    const s = new EventSource("/api/stream");
-    source.current = s;
-    s.onmessage = () => {
-      void load();
-    };
-    s.addEventListener("resync", () => void load(true));
+    const visibility = () => setVisible(document.visibilityState === "visible");
+    visibility();
+    document.addEventListener("visibilitychange", visibility);
     const timer = setInterval(() => setClock(new Date()), 1000);
     return () => {
       feed.current?.cancel();
-      s.close();
+      document.removeEventListener("visibilitychange", visibility);
       clearInterval(timer);
     };
-  }, [load]);
+  }, []);
   useEffect(() => {
-    if (data?.connection.mode !== "demo") {
-      setBusy(true);
-      void load(true).finally(() => setBusy(false));
-    }
+    if (!session) return;
+    feed.current?.cancel();
+    queryClient.removeQueries({
+      predicate: (query) =>
+        query.queryKey[0] !== "home-status" && query.queryKey[1] !== session,
+    });
+    pendingData.current = null;
+    setPending(0);
+    setSelected(null);
+    dataRef.current = null;
+    setData(null);
+  }, [session, queryClient]);
+  useEffect(() => {
+    if (!status.data) return;
+    const next = status.data;
+    setData((current) => {
+      const snapshot =
+        next.connection.mode === "demo"
+          ? current?.connection.mode === "demo"
+            ? current
+            : createDemo()
+          : { ...(current || { events: [] }), ...next };
+      dataRef.current = snapshot;
+      return snapshot;
+    });
+  }, [status.data, status.dataUpdatedAt]);
+  useEffect(() => {
+    if (timeline.data && timeline.data.connection.sessionId === session)
+      feed.current?.receive(url, {
+        ...timeline.data,
+        ...(status.dataUpdatedAt > timeline.dataUpdatedAt ? status.data : {}),
+      });
+  }, [
+    timeline.data,
+    timeline.dataUpdatedAt,
+    status.data,
+    status.dataUpdatedAt,
+    session,
+    url,
+    period,
+    excluded,
+    domains,
+  ]);
+  useEffect(() => {
     setLimit(80);
-  }, [range.start, range.end, load]);
+  }, [range.start, range.end]);
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (dataRef.current?.connection.mode !== "demo") void load(true);
-    }, 180);
+    const timer = setTimeout(() => setDebouncedFilters(filtersQuery), 180);
     return () => clearTimeout(timer);
-  }, [filtersQuery, load]);
+  }, [filtersQuery]);
+  useEffect(() => {
+    if (!status.isError && !timeline.isError) return;
+    setData((current) =>
+      current && current.connection.mode !== "demo"
+        ? {
+            ...current,
+            connection: {
+              ...current.connection,
+              mode: "reconnecting",
+              message: "The local server is unavailable. Retrying…",
+            },
+          }
+        : current,
+    );
+  }, [status.isError, timeline.isError]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -189,7 +277,16 @@ export default function HomeTimeline() {
     setSelected(event);
   };
   const showPending = () => {
-    if (pendingData.current) setData(pendingData.current);
+    if (pendingData.current) {
+      const next = {
+        ...pendingData.current,
+        connection: data!.connection,
+        states: data!.states,
+        metadata: data!.metadata,
+      };
+      dataRef.current = next;
+      setData(next);
+    }
     pendingData.current = null;
     setPending(0);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -245,10 +342,15 @@ export default function HomeTimeline() {
   const disconnect = async () => {
     const res = await fetch("/api/connection", { method: "DELETE" });
     if (res.ok) {
+      feed.current?.cancel();
+      queryClient.clear();
       setData(createDemo());
+      dataRef.current = null;
+      setSelected(null);
       setSettingsOpen(false);
       pendingData.current = null;
       setPending(0);
+      await status.refetch();
     }
   };
   const allEvents = data?.events || [];
@@ -312,6 +414,13 @@ export default function HomeTimeline() {
   ].filter(Boolean) as { type: string; name: string; clear: () => void }[];
   const { time, day } = timelineFormat(data?.connection.timezone);
   const demo = data?.connection.mode === "demo";
+  const waitingForInitial =
+    !items.length &&
+    !demo &&
+    (status.isPending ||
+      status.data?.connection.mode === "reconnecting" ||
+      timeline.isPending ||
+      timeline.data?.connection.history === "loading");
   const needsConnection = demo || data?.connection.mode === "error";
   return (
     <MotionConfig reducedMotion="user">
@@ -431,28 +540,43 @@ export default function HomeTimeline() {
             />
             <div className="coverage-line">
               <span>
-                {data?.nextCursor
-                  ? "More activity is available · load more below"
-                  : busy || data?.connection.history === "loading"
-                    ? "Gathering your home’s history…"
-                    : demo
-                      ? "A glimpse into a day at home"
-                      : data?.connection.history === "partial"
-                        ? "Some history could not be loaded"
-                        : data?.connection.history === "unavailable"
-                          ? "History unavailable · live activity will still appear"
-                          : `${day(range.start)} · ${time(range.start)}–${period === "Live" ? time(clock.toISOString()) : time(range.end)}`}
+                {data?.connection.mode === "reconnecting" && !data.states.length
+                  ? "Connecting to your home…"
+                  : data?.nextCursor
+                    ? "More activity is available · load more below"
+                    : busy || data?.connection.history === "loading"
+                      ? "Gathering your home’s history…"
+                      : demo
+                        ? "A glimpse into a day at home"
+                        : data?.connection.history === "partial"
+                          ? "Some history could not be loaded"
+                          : data?.connection.history === "unavailable"
+                            ? "History unavailable · live activity will still appear"
+                            : `${day(range.start)} · ${time(range.start)}–${period === "Live" || period === "Today" ? time(clock.toISOString()) : time(range.end)}`}
               </span>
-              {period === "Live" && (
-                <span className="live-status">
-                  <span className="live-dot" />
-                  {demo
-                    ? "SIMULATED LIVE"
-                    : data?.connection.mode === "connected"
-                      ? "LIVE"
-                      : "OFFLINE"}
-                </span>
-              )}
+              <span className="live-status">
+                {period === "Live" && (
+                  <>
+                    <span className="live-dot" />
+                    {demo
+                      ? "SIMULATED LIVE"
+                      : data?.connection.mode === "connected"
+                        ? "UPDATES EVERY MINUTE"
+                        : "OFFLINE"}
+                  </>
+                )}
+                <button
+                  className="icon-button"
+                  aria-label="Refresh home activity"
+                  disabled={busy || status.isFetching}
+                  onClick={() => {
+                    void status.refetch();
+                    if (!demo) void timeline.refetch();
+                  }}
+                >
+                  <RefreshCw size={14} />
+                </button>
+              </span>
             </div>
             {data?.connection.message && (
               <div className="connection-notice">
@@ -470,8 +594,12 @@ export default function HomeTimeline() {
               </button>
             )}
             <div className="timeline">
-              {!data ? (
-                <div className="skeleton">
+              {!data || waitingForInitial ? (
+                <div
+                  className="skeleton"
+                  role="status"
+                  aria-label="Loading home activity"
+                >
                   {[1, 2, 3, 4].map((i) => (
                     <div key={i} />
                   ))}
@@ -606,11 +734,13 @@ export default function HomeTimeline() {
             open
             onOpenChange={setConnectOpen}
             onConnected={async (snapshot) => {
+              feed.current?.cancel();
+              queryClient.clear();
               setData(snapshot);
               dataRef.current = snapshot;
               pendingData.current = null;
               setPending(0);
-              await load(true);
+              await status.refetch();
             }}
           />
         )}

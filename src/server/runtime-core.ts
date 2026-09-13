@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { HomeAssistantAdapter } from "./adapter";
 import { ObservationStore } from "./store";
@@ -11,8 +12,10 @@ import type {
   Metadata,
   Observation,
   Snapshot,
+  HomeStatus,
 } from "../lib/types";
 export class HomeRuntime {
+  private sessionId = randomUUID();
   private readonly events = new EventEmitter();
   private readonly store = new ObservationStore();
   connection: Connection = {
@@ -261,9 +264,15 @@ export class HomeRuntime {
     // Bucket requests to avoid repeated fetches on every live notification.
     const from = Math.floor(Date.parse(start) / 3600000) * 3600000,
       to = Math.min(Date.parse(end), Date.now());
-    const key = `${from}:${Math.ceil(to / 3600000)}`;
+    // Closed ranges can be retained for the session; use their exact endpoint
+    // so a shorter import never claims coverage for a longer one.
+    const closed = Date.parse(end) < Date.now() - 300000;
+    const key = closed
+      ? `${from}:closed:${to}`
+      : `${from}:${Math.ceil(to / 3600000)}`;
     const cached = this.ranges.get(key);
     if (!force && cached && cached.until > Date.now()) return cached.promise;
+    const entry = { promise: Promise.resolve(), until: Infinity };
     const task = (async () => {
       this.connection.history = "loading";
       this.notify();
@@ -322,6 +331,7 @@ export class HomeRuntime {
           ? "partial"
           : "unavailable"
         : "ready";
+      entry.until = closed && !failures ? Infinity : Date.now() + 300000;
       // Eviction must not invalidate completed range requests: otherwise every
       // browser refresh starts the same oversized import again.
       if (this.store.evictions)
@@ -329,13 +339,21 @@ export class HomeRuntime {
           "Older technical details were trimmed to keep the local cache bounded.";
       this.notify();
     })();
-    this.ranges.set(key, { promise: task, until: Date.now() + 300000 });
+    entry.promise = task;
+    this.ranges.set(key, entry);
     if (this.ranges.size > 100)
       this.ranges.delete(this.ranges.keys().next().value!);
     return task;
   }
   evidence(id: string) {
     return this.store.get(id);
+  }
+  status(): HomeStatus {
+    return {
+      connection: { ...this.connection, sessionId: this.sessionId },
+      states: [...this.states.values()],
+      metadata: this.metadata,
+    };
   }
   snapshot(
     start: string,
@@ -389,9 +407,7 @@ export class HomeRuntime {
       counts.set(e.entityId, value);
     }
     return {
-      connection: { ...this.connection },
-      states: [...this.states.values()],
-      metadata: this.metadata,
+      ...this.status(),
       events: page,
       hiddenCount: normalized.filter((e) => e.suppressed).length,
       noise: [...counts.values()]
@@ -402,6 +418,7 @@ export class HomeRuntime {
     };
   }
   private reset() {
+    this.sessionId = randomUUID();
     this.generation++;
     this.adapter?.disconnect();
     this.adapter = undefined;

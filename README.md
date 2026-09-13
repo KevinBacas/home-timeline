@@ -54,7 +54,7 @@ HA_TOKEN=your-long-lived-access-token
 - **Stories**: arrival, movie time, and repeated room activity use deterministic timing rules. Expanding reveals individual events in chronological order.
 - **Event inspector**: click an event for state and attribute differences, available context relationships, and sanitized source evidence. Click its entity to inspect history.
 - **Settings**: choose a theme, enable Debug mode, inspect activity counts, or exclude entities/domains. Preferences stay in this browser.
-- **Live updates**: while reading older activity, the timeline holds its position and offers a “Back to now” button.
+- **Updates**: current status and activity refresh every minute while the tab is visible. Use the refresh button for an immediate check. While reading older activity, the timeline holds its position and offers a “Back to now” button.
 
 ## Architecture
 
@@ -69,14 +69,14 @@ lib/engine.ts — semantic events, noise rules, context links, stories
         ↓
 server/runtime-core.ts + store.ts — session, reconnect, bounded cache
         ↓
-local HTTP queries + SSE invalidation/replay
+local HTTP queries + TanStack Query memory cache
         ↓
 React timeline, filters, and inspector
 ```
 
 The persistent Node process shares one Home Assistant connection across tabs. `runtime.ts` enforces the server-only import boundary and reuses the runtime across development module reloads. State transitions and automation events are subscribed before loading the current snapshot. History loads in entity batches and six-hour slices, with at most two history requests in flight per adapter. Live evidence wins when history overlaps.
 
-The normalized model keeps observations, semantic events, references, source provenance, and grouping rules separate from presentation. Search runs server-side over the loaded period before pagination. Pages contain up to 2,000 events plus story-boundary context; the interface initially renders 80 timeline items. The observation cache has a 128MB conservative accounting budget and evicts suppressed technical noise before meaningful events. Cache eviction does not trigger repeated history imports. SSE retains 256 small invalidations and requests resynchronization for expired cursors. Browser reconnection queries current data rather than treating notifications as a durable event log.
+The normalized model keeps observations, semantic events, references, source provenance, and grouping rules separate from presentation. Search runs server-side over the loaded period before pagination. Pages contain up to 2,000 events plus story-boundary context; the interface initially renders 80 timeline items. The observation cache has a 128MB conservative accounting budget and evicts suppressed technical noise before meaningful events. Cache eviction does not trigger repeated history imports. TanStack Query shares requests and caches browser responses in memory. Status uses a lightweight endpoint every minute; active timeline ranges refresh at the same interval. Hidden tabs pause automatic requests, and returning to stale data refreshes it. Completed past ranges stay fresh for ten minutes and do not poll; connection setup and loading history are checked every two seconds until ready, then return to slow polling. Partial or unavailable history retries on the minute cadence. Entity history is fetched on demand. Connection session IDs keep caches separate, and connection changes clear retained browser data. The legacy SSE endpoint remains available, but the browser no longer subscribes to it.
 
 ## Interpretation and limits
 
@@ -84,7 +84,7 @@ Supported interpretation includes doors/windows, locks/alarms, lights and meanin
 
 Motion clearing, sensor measurements, playback-position changes, and insignificant brightness updates are hidden normally. Debug mode reveals retained technical observations. Brief availability interruptions are suppressed. Room motion is never attributed to a person without person evidence.
 
-History depends on Home Assistant's recorder, retention, entity exclusions, and permissions. Missing history is not proof that nothing happened. State history can be backfilled after a disconnect; missing non-state events and complete historical causality cannot always be reconstructed. Metadata refreshes every five minutes and on reconnect. Historical events use currently available entity/room names.
+History depends on Home Assistant's recorder, retention, entity exclusions, and permissions. Missing history is not proof that nothing happened. State history can be backfilled after a disconnect; missing non-state events and complete historical causality cannot always be reconstructed. Successful imports ending more than five minutes in the past are reused for the server session, within the 100-range cache bound. Current or failed imports remain eligible for retry after five minutes; reconnect backfills can explicitly bypass the cache. Metadata refreshes every five minutes and on reconnect. Historical events use currently available entity/room names.
 
 Story grouping is a timing heuristic, not proof of causality. The inspector distinguishes matching automation contexts, other related activity, and unavailable causes. Full automation traces, AI, anomaly detection, persistent event storage, dedicated room/person pages, camera content, device control, and cloud/LAN hosting are not included.
 

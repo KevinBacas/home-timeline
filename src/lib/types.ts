@@ -81,6 +81,7 @@ export type TimelineItem =
   | { type: "event"; event: TimelineEvent; id: string; timestamp: string }
   | { type: "story"; story: Story; id: string; timestamp: string };
 export type Connection = {
+  sessionId?: string;
   mode: "demo" | "connected" | "reconnecting" | "error";
   configured: boolean;
   managed: boolean;
@@ -100,3 +101,4 @@ export type Snapshot = {
   hiddenCount?: number;
   noise?: { entityId: string; total: number; hidden: number }[];
 };
+export type HomeStatus = Pick<Snapshot, "connection" | "states" | "metadata">;

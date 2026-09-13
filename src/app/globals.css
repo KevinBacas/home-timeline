@@ -457,6 +457,8 @@ h2 {
 .coverage-line {
   margin: 18px 0 24px;
   display: flex;
+  align-items: center;
+  gap: 12px;
   justify-content: space-between;
   font-size: 10px;
   color: var(--muted);
