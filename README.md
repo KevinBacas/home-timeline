@@ -89,6 +89,8 @@ History depends on Home Assistant's recorder, retention, entity exclusions, and 
 
 Story grouping is a timing heuristic, not proof of causality. When `JEV_TOKEN` is configured, Jev may confirm small groups of nearby events in the server; those decisions are cached in memory, require high confidence, and never remove the underlying events. Jev receives a compact summary of event titles, rooms, categories, and timestamps. If the service is unavailable, deterministic grouping continues unchanged. The inspector distinguishes matching automation contexts, other related activity, and unavailable causes. Full automation traces, anomaly detection, persistent event storage, dedicated room/person pages, camera content, device control, and cloud/LAN hosting are not included.
 
+The complete event interpretation and grouping pipeline is documented in [`docs/event-processing.md`](docs/event-processing.md).
+
 ## Security
 
 ### Current model
