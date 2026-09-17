@@ -328,6 +328,58 @@ test("nearby distinct room lights form an expandable stable story", () => {
   assert.deepEqual(groupEvents([...lights].reverse()), result);
 });
 
+test("Jev-confirmed events form a compact story without losing evidence", () => {
+  const events = createDemo().events.filter((event) => !event.suppressed);
+  const [first, second] = events;
+  const items = groupEvents([
+    { ...first, aiGroup: { id: "jev:test", confidence: 0.8 } },
+    { ...second, aiGroup: { id: "jev:test", confidence: 0.8 } },
+  ]);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].type, "story");
+  if (items[0].type === "story") {
+    assert.equal(items[0].story.rule, "ai");
+    assert.deepEqual(
+      items[0].story.events.map((event) => event.id),
+      [first.id, second.id],
+    );
+  }
+});
+
+test("Jev intents produce controlled, human-readable titles", () => {
+  const demo = createDemo();
+  const arrival = demo.events.find(
+    (event) =>
+      event.kind === "presence.arrived" && event.person?.name === "Kevin",
+  )!;
+  const door = demo.events.find(
+    (event) =>
+      event.kind === "security.opening" &&
+      event.observation.current?.state === "off",
+  )!;
+  const items = groupEvents([
+    {
+      ...arrival,
+      aiGroup: {
+        id: "jev:welcome",
+        confidence: 0.8,
+        intent: "welcome_home_with_door",
+      },
+    },
+    {
+      ...door,
+      aiGroup: {
+        id: "jev:welcome",
+        confidence: 0.8,
+        intent: "welcome_home_with_door",
+      },
+    },
+  ]);
+  assert.equal(items[0].type, "story");
+  if (items[0].type === "story")
+    assert.equal(items[0].story.title, "Kevin est rentré et a fermé la porte");
+});
+
 test("light grouping respects room, time, distinct entities and off transitions", () => {
   const light = (id: string, seconds: number, room = "bedroom", next = "on") =>
     normalize(

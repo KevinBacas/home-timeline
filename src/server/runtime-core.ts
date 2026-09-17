@@ -4,6 +4,11 @@ import { z } from "zod";
 import { HomeAssistantAdapter } from "./adapter";
 import { ObservationStore } from "./store";
 import { interpret, groupEvents } from "../lib/engine";
+import {
+  evaluateEventGroupIntents,
+  evaluateEventPairs,
+  eventPairKey,
+} from "./jev";
 import { selectTimeline, type TimelineFilters } from "../lib/query";
 import { rangeForPeriod } from "../lib/time";
 import type {
@@ -13,6 +18,8 @@ import type {
   Observation,
   Snapshot,
   HomeStatus,
+  StoryIntent,
+  TimelineEvent,
 } from "../lib/types";
 export class HomeRuntime {
   private sessionId = randomUUID();
@@ -42,6 +49,11 @@ export class HomeRuntime {
   private connecting = false;
   private initialized = false;
   private metadataTimer?: ReturnType<typeof setInterval>;
+  private readonly jevPairs = new Map<string, boolean>();
+  private readonly jevIntents = new Map<string, StoryIntent>();
+  private jevRefreshing = false;
+  private jevLastAttempt?: string;
+  private jevError = false;
   constructor() {
     this.events.setMaxListeners(100);
   }
@@ -104,7 +116,149 @@ export class HomeRuntime {
     }
     this.connection.lastUpdate = new Date().toISOString();
     this.notify();
+    void this.refreshJevGroups();
   };
+  private async refreshJevGroups() {
+    if (!process.env.JEV_TOKEN || this.jevRefreshing) return;
+    this.jevRefreshing = true;
+    try {
+      const end = Date.now();
+      const events = interpret(
+        this.store.query(
+          new Date(end - 10 * 60000).toISOString(),
+          new Date(end + 1000).toISOString(),
+        ),
+        this.metadata,
+      ).filter((event) => !event.suppressed);
+      const pairs = [];
+      for (let i = 0; i < events.length; i++)
+        for (let j = i + 1; j < events.length; j++) {
+          const a = events[i],
+            b = events[j];
+          if (
+            Math.abs(Date.parse(a.timestamp) - Date.parse(b.timestamp)) > 120000
+          )
+            continue;
+          if (!this.jevPairs.has(eventPairKey(a, b))) pairs.push({ a, b });
+        }
+      if (!pairs.length) return;
+      this.jevLastAttempt = new Date().toISOString();
+      const results = await evaluateEventPairs(pairs.slice(0, 24));
+      if (results === null) {
+        this.jevError = true;
+        this.notify();
+        return;
+      }
+      this.jevError = false;
+      for (const [key, value] of results) this.jevPairs.set(key, value);
+      while (this.jevPairs.size > 2048)
+        this.jevPairs.delete(this.jevPairs.keys().next().value!);
+      if (results.size) this.notify();
+      void this.refreshJevIntents();
+    } finally {
+      this.jevRefreshing = false;
+    }
+  }
+  private async refreshJevIntents() {
+    if (!process.env.JEV_TOKEN) return;
+    const end = Date.now();
+    const events = interpret(
+      this.store.query(
+        new Date(end - 10 * 60000).toISOString(),
+        new Date(end + 1000).toISOString(),
+      ),
+      this.metadata,
+    ).filter((event) => !event.suppressed);
+    const groups = this.groupJevEvents(events);
+    const pending = groups.filter((group) => !this.jevIntents.has(group.id));
+    if (!pending.length) return;
+    const intents = await evaluateEventGroupIntents(pending.slice(0, 8));
+    if (!intents) return;
+    for (const [id, intent] of intents) this.jevIntents.set(id, intent);
+    this.notify();
+  }
+  private groupJevEvents(events: ReturnType<typeof interpret>) {
+    const parent = new Map<string, string>();
+    const find = (id: string): string => {
+      const value = parent.get(id);
+      if (!value) {
+        parent.set(id, id);
+        return id;
+      }
+      if (value === id) return value;
+      const root = find(value);
+      parent.set(id, root);
+      return root;
+    };
+    for (const event of events) parent.set(event.id, event.id);
+    for (const [key, related] of this.jevPairs) {
+      if (!related) continue;
+      const [a, b] = key.split("\n");
+      if (parent.has(a) && parent.has(b)) parent.set(find(a), find(b));
+    }
+    const groups = new Map<string, TimelineEvent[]>();
+    for (const event of events) {
+      const root = find(event.id);
+      groups.set(root, [...(groups.get(root) || []), event]);
+    }
+    return [...groups]
+      .filter(([, group]) => group.length > 1)
+      .map(([root, group]) => ({ id: `jev:${root}`, events: group }));
+  }
+  private jevStatus() {
+    return {
+      configured: Boolean(process.env.JEV_TOKEN),
+      status: this.jevRefreshing
+        ? ("evaluating" as const)
+        : this.jevError
+          ? ("error" as const)
+          : this.jevLastAttempt
+            ? ("ready" as const)
+            : ("idle" as const),
+      evaluatedPairs: this.jevPairs.size,
+      confirmedPairs: [...this.jevPairs.values()].filter(Boolean).length,
+      lastAttempt: this.jevLastAttempt,
+    };
+  }
+  private addJevGroups(events: ReturnType<typeof interpret>) {
+    const parent = new Map<string, string>();
+    const find = (id: string): string => {
+      const value = parent.get(id);
+      if (!value) {
+        parent.set(id, id);
+        return id;
+      }
+      if (value === id) return value;
+      const root = find(value);
+      parent.set(id, root);
+      return root;
+    };
+    const union = (a: string, b: string) => parent.set(find(a), find(b));
+    for (const event of events) parent.set(event.id, event.id);
+    for (const [key, related] of this.jevPairs) {
+      if (!related) continue;
+      const [a, b] = key.split("\n");
+      if (parent.has(a) && parent.has(b)) union(a, b);
+    }
+    const sizes = new Map<string, number>();
+    for (const event of events) {
+      const root = find(event.id);
+      sizes.set(root, (sizes.get(root) || 0) + 1);
+    }
+    return events.map((event) => {
+      const root = find(event.id);
+      return sizes.get(root)! > 1
+        ? {
+            ...event,
+            aiGroup: {
+              id: `jev:${root}`,
+              confidence: 0.8,
+              intent: this.jevIntents.get(`jev:${root}`),
+            },
+          }
+        : event;
+    });
+  }
   async connect(url: string, token: string, managed = false) {
     if (this.connecting)
       throw new Error("A connection attempt is already in progress.");
@@ -338,6 +492,7 @@ export class HomeRuntime {
         this.connection.message =
           "Older technical details were trimmed to keep the local cache bounded.";
       this.notify();
+      void this.refreshJevGroups();
     })();
     entry.promise = task;
     this.ranges.set(key, entry);
@@ -350,7 +505,11 @@ export class HomeRuntime {
   }
   status(): HomeStatus {
     return {
-      connection: { ...this.connection, sessionId: this.sessionId },
+      connection: {
+        ...this.connection,
+        sessionId: this.sessionId,
+        jev: this.jevStatus(),
+      },
       states: [...this.states.values()],
       metadata: this.metadata,
     };
@@ -365,7 +524,9 @@ export class HomeRuntime {
       new Date(Date.parse(start) - 600000).toISOString(),
       new Date(Date.parse(end) + 180000).toISOString(),
     );
-    const normalized = interpret(observations, this.metadata);
+    const normalized = this.addJevGroups(
+      interpret(observations, this.metadata),
+    );
     const events = selectTimeline(normalized, {
       start,
       end,
@@ -428,6 +589,8 @@ export class HomeRuntime {
     this.metadata = {};
     this.store.clear();
     this.ranges.clear();
+    this.jevPairs.clear();
+    this.jevIntents.clear();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = undefined;
     for (const timer of this.availabilityTimers) clearTimeout(timer);

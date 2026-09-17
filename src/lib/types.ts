@@ -67,10 +67,19 @@ export type TimelineEvent = {
     eventId: string;
     relationship: "automation" | "context";
   }[];
+  aiGroup?: { id: string; confidence: number; intent?: StoryIntent };
 };
+export type StoryIntent =
+  | "movie_start"
+  | "welcome_home"
+  | "welcome_home_with_door"
+  | "lights_together"
+  | "room_activity"
+  | "automation_sequence"
+  | "unclear";
 export type Story = {
   id: string;
-  rule: "arrival" | "movie" | "activity" | "lighting";
+  rule: "arrival" | "movie" | "activity" | "lighting" | "ai";
   title: string;
   timestamp: string;
   end: string;
@@ -90,6 +99,13 @@ export type Connection = {
   message?: string;
   lastUpdate?: string;
   history: "idle" | "loading" | "ready" | "partial" | "unavailable";
+  jev?: {
+    configured: boolean;
+    status: "idle" | "evaluating" | "ready" | "error";
+    evaluatedPairs: number;
+    confirmedPairs: number;
+    lastAttempt?: string;
+  };
 };
 export type Snapshot = {
   connection: Connection;

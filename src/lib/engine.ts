@@ -5,6 +5,7 @@ import type {
   Story,
   TimelineEvent,
   TimelineItem,
+  StoryIntent,
 } from "./types";
 export function observationId(state: HAState, type = "state") {
   return `${type}:${state.entity_id}:${state.last_updated}:${state.state}`;
@@ -251,8 +252,47 @@ export function groupEvents(events: TimelineEvent[]): TimelineItem[] {
       description,
     });
   };
+  const aiTitle = (
+    intent: StoryIntent | undefined,
+    members: TimelineEvent[],
+  ) => {
+    const person = members.find((event) => event.person)?.person?.name;
+    const room = members.find((event) => event.room)?.room?.name;
+    if (intent === "movie_start") return "Soirée film qui commence";
+    if (intent === "welcome_home_with_door")
+      return `${person || "Quelqu’un"} est rentré et a fermé la porte`;
+    if (intent === "welcome_home") return `${person || "Quelqu’un"} est rentré`;
+    if (intent === "lights_together")
+      return `Les lumières${room ? ` de ${room}` : ""} s’allument`;
+    if (intent === "room_activity")
+      return `Activité${room ? ` dans ${room.toLowerCase()}` : " à la maison"}`;
+    if (intent === "automation_sequence")
+      return "Une automatisation se déclenche";
+    return "Un moment connecté";
+  };
+  const aiGroups = new Map<string, TimelineEvent[]>();
+  for (const event of sorted) {
+    if (event.aiGroup && !event.suppressed)
+      aiGroups.set(event.aiGroup.id, [
+        ...(aiGroups.get(event.aiGroup.id) || []),
+        event,
+      ]);
+  }
+  for (const members of aiGroups.values()) {
+    if (members.length < 2) continue;
+    const intent = members.find((event) => event.aiGroup?.intent)?.aiGroup
+      ?.intent;
+    add(
+      members[0],
+      members,
+      "ai",
+      aiTitle(intent, members),
+      `${members.length} related events · confirmed by Jev`,
+    );
+  }
   for (const anchor of sorted.filter(
     (e) =>
+      !claimed.has(e.id) &&
       e.kind === "media.playing" &&
       e.room &&
       e.observation.current?.attributes.device_class === "tv",
@@ -272,7 +312,9 @@ export function groupEvents(events: TimelineEvent[]): TimelineItem[] {
         `${anchor.room!.name} settled in for the evening`,
       );
   }
-  for (const anchor of sorted.filter((e) => e.kind === "presence.arrived"))
+  for (const anchor of sorted.filter(
+    (e) => !claimed.has(e.id) && e.kind === "presence.arrived",
+  ))
     add(
       anchor,
       [
@@ -291,7 +333,8 @@ export function groupEvents(events: TimelineEvent[]): TimelineItem[] {
   // Keep larger arrival/movie stories intact. Group distinct lights only;
   // repeated toggles and unknown rooms must remain individually inspectable.
   for (const anchor of sorted.filter(
-    (e) => e.kind === "lighting.on" && e.room && !e.suppressed,
+    (e) =>
+      !claimed.has(e.id) && e.kind === "lighting.on" && e.room && !e.suppressed,
   )) {
     if (claimed.has(anchor.id)) continue;
     const members = [anchor];

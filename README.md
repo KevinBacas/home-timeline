@@ -42,6 +42,7 @@ For persistence, copy `.env.example` to `.env.local` and set:
 ```dotenv
 HA_URL=http://homeassistant.local:8123
 HA_TOKEN=your-long-lived-access-token
+JEV_TOKEN=your-typesafe-jev-token
 ```
 
 `.env.local` is ignored by Git. Environment settings take precedence over onboarding. Disconnect clears the active session; an environment-managed connection resumes after server restart. Do not prefix either variable with `NEXT_PUBLIC_`.
@@ -86,7 +87,7 @@ Motion clearing, sensor measurements, playback-position changes, and insignifica
 
 History depends on Home Assistant's recorder, retention, entity exclusions, and permissions. Missing history is not proof that nothing happened. State history can be backfilled after a disconnect; missing non-state events and complete historical causality cannot always be reconstructed. Successful imports ending more than five minutes in the past are reused for the server session, within the 100-range cache bound. Current or failed imports remain eligible for retry after five minutes; reconnect backfills can explicitly bypass the cache. Metadata refreshes every five minutes and on reconnect. Historical events use currently available entity/room names.
 
-Story grouping is a timing heuristic, not proof of causality. The inspector distinguishes matching automation contexts, other related activity, and unavailable causes. Full automation traces, AI, anomaly detection, persistent event storage, dedicated room/person pages, camera content, device control, and cloud/LAN hosting are not included.
+Story grouping is a timing heuristic, not proof of causality. When `JEV_TOKEN` is configured, Jev may confirm small groups of nearby events in the server; those decisions are cached in memory, require high confidence, and never remove the underlying events. Jev receives a compact summary of event titles, rooms, categories, and timestamps. If the service is unavailable, deterministic grouping continues unchanged. The inspector distinguishes matching automation contexts, other related activity, and unavailable causes. Full automation traces, anomaly detection, persistent event storage, dedicated room/person pages, camera content, device control, and cloud/LAN hosting are not included.
 
 ## Security
 

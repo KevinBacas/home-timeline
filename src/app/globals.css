@@ -1365,6 +1365,20 @@ select:focus {
   margin: 10px 0 20px;
   border-radius: 8px;
 }
+.jev-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: -10px 0 18px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.jev-status.evaluating {
+  color: var(--accent);
+}
+.jev-status.error {
+  color: var(--secondary);
+}
 .new-events {
   position: sticky;
   top: 12px;

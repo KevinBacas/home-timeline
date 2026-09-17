@@ -578,6 +578,20 @@ function HomeTimelineScreen() {
                 </button>
               </span>
             </div>
+            {!demo && data?.connection.jev && (
+              <div className={`jev-status ${data.connection.jev.status}`}>
+                <Sparkles size={14} />
+                {data.connection.jev.status === "evaluating"
+                  ? "Jev is evaluating recent activity…"
+                  : data.connection.jev.status === "error"
+                    ? "Jev is unavailable · local grouping continues"
+                    : data.connection.jev.evaluatedPairs
+                      ? `Jev evaluated ${data.connection.jev.evaluatedPairs} nearby pairs · ${data.connection.jev.confirmedPairs} confirmed`
+                      : data.connection.jev.configured
+                        ? "Jev is ready for nearby activity"
+                        : "Jev is not configured"}
+              </div>
+            )}
             {data?.connection.message && (
               <div className="connection-notice">
                 <Wifi size={15} />
