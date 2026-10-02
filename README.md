@@ -13,7 +13,7 @@ A local, read-only activity journal for Home Assistant. An editorial timeline, l
 
 ## Run
 
-Requires Node.js 20.19+ and npm.
+Requires Node.js 22+ and npm.
 
 ```bash
 npm install
@@ -42,10 +42,22 @@ For persistence, copy `.env.example` to `.env.local` and set:
 ```dotenv
 HA_URL=http://homeassistant.local:8123
 HA_TOKEN=your-long-lived-access-token
-JEV_TOKEN=your-typesafe-jev-token
 ```
 
-`.env.local` is ignored by Git. Environment settings take precedence over onboarding. Disconnect clears the active session; an environment-managed connection resumes after server restart. Do not prefix either variable with `NEXT_PUBLIC_`.
+`.env.local` is ignored by Git. Environment settings take precedence over onboarding. Disconnect clears the active session; an environment-managed connection resumes after server restart. Do not prefix credential variables with `NEXT_PUBLIC_`.
+
+To enable optional Jev grouping through [Vercel AI Gateway](https://vercel.com/ai-gateway/models/jev), add an AI Gateway key to `.env` or `.env.local`:
+
+```dotenv
+AI_GATEWAY_API_KEY=your-vercel-ai-gateway-key
+# Optional: defaults to Jev. Must support the AI Gateway evaluation API.
+AI_GATEWAY_MODEL=typesafe-ai/jev
+```
+
+Restart the server after changing these settings. The key stays on the server;
+Jev no longer uses a direct TypeSafe token. Without an AI Gateway key, local
+grouping still works. The SDK version is pinned because its evaluation API is
+experimental.
 
 ## Explore
 
@@ -87,7 +99,7 @@ Motion clearing, sensor measurements, playback-position changes, and insignifica
 
 History depends on Home Assistant's recorder, retention, entity exclusions, and permissions. Missing history is not proof that nothing happened. State history can be backfilled after a disconnect; missing non-state events and complete historical causality cannot always be reconstructed. Successful imports ending more than five minutes in the past are reused for the server session, within the 100-range cache bound. Current or failed imports remain eligible for retry after five minutes; reconnect backfills can explicitly bypass the cache. Metadata refreshes every five minutes and on reconnect. Historical events use currently available entity/room names.
 
-Story grouping is a timing heuristic, not proof of causality. When `JEV_TOKEN` is configured, Jev may confirm small groups of nearby events in the server; those decisions are cached in memory, require high confidence, and never remove the underlying events. Jev receives a compact summary of event titles, rooms, categories, and timestamps. If the service is unavailable, deterministic grouping continues unchanged. The inspector distinguishes matching automation contexts, other related activity, and unavailable causes. Full automation traces, anomaly detection, persistent event storage, dedicated room/person pages, camera content, device control, and cloud/LAN hosting are not included.
+Story grouping is a timing heuristic, not proof of causality. When `AI_GATEWAY_API_KEY` is configured, Jev may confirm small groups of nearby events through Vercel AI Gateway using the AI SDK evaluation API; those decisions are cached in memory, require high confidence, and never remove the underlying events. The gateway and selected model provider receive a compact summary of event IDs, titles, descriptions, rooms, categories, kinds, and timestamps, without raw Home Assistant attributes or credentials. Requests retain a 1.5-second deadline and a 256 KB response limit, with SDK retries disabled. If the service is unavailable, deterministic grouping continues unchanged. The inspector distinguishes matching automation contexts, other related activity, and unavailable causes. Full automation traces, anomaly detection, persistent event storage, dedicated room/person pages, camera content, device control, and cloud/LAN hosting are not included.
 
 The complete event interpretation and grouping pipeline is documented in [`docs/event-processing.md`](docs/event-processing.md).
 

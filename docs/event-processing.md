@@ -211,7 +211,11 @@ implémentée, la règle de référence reste celle décrite ci-dessus.
 ## 5. Jev : rôle et conditions d'appel
 
 Jev n'est pas le moteur principal de la timeline. Il apporte une confirmation
-sémantique à des événements déjà interprétés.
+sémantique à des événements déjà interprétés. Les appels passent par Vercel AI
+Gateway avec `experimental_evaluate` du SDK `ai` et le modèle `typesafe-ai/jev`
+par défaut. `AI_GATEWAY_MODEL` permet de choisir un autre modèle compatible avec
+l'API d'évaluation. Le SDK 7 nécessite Node.js 22 minimum ; sa version est figée
+car l'API d'évaluation est expérimentale.
 
 ### Quand Jev peut être appelé
 
@@ -219,17 +223,18 @@ sémantique à des événements déjà interprétés.
 le runtime examine les événements visibles des dix dernières minutes. Jev est
 appelé seulement si toutes les conditions suivantes sont réunies :
 
-1. `JEV_TOKEN` est présent côté serveur ;
+1. `AI_GATEWAY_API_KEY` est présent côté serveur ;
 2. aucun autre calcul Jev n'est déjà en cours ;
 3. il existe au moins une paire d'événements visibles ;
 4. les deux événements de la paire sont espacés de deux minutes maximum ;
 5. cette paire n'a pas déjà été évaluée dans la session.
 
 Un appel traite au maximum 24 nouvelles paires. Chaque paire reçoit une
-question `noul` demandant si les deux événements appartiennent au même moment
+question `boolean` demandant si les deux événements appartiennent au même moment
 humain cohérent. Une réponse est considérée positive à partir d'une probabilité
 de 0,8. Les résultats sont conservés en mémoire, avec une limite de 2 048
-paires.
+paires. Le SDK valide les types, les probabilités et la présence d'une réponse
+pour chaque question avant que le runtime ne conserve les décisions.
 
 Important : dans l'état actuel du code, les détections de mouvement visibles
 peuvent donc faire partie des paires envoyées à Jev si elles satisfont ces
@@ -265,11 +270,18 @@ le titre retombe sur `Un moment connecté`.
 
 ### Échec ou absence de Jev
 
-Si le token manque, si Jev répond en erreur, si le délai de 1,5 seconde est
+Si la clé AI Gateway manque, si Jev répond en erreur, si le délai de 1,5 seconde est
 dépassé ou si la réponse ne respecte pas le schéma attendu, les règles locales
 continuent normalement. L'interface expose alors l'état Jev (`idle`,
 `evaluating`, `ready` ou `error`) ainsi que le nombre de paires évaluées et
 confirmées.
+
+Les réponses sont limitées à 256 KB avant leur lecture complète par le SDK.
+Les tentatives automatiques du SDK sont désactivées pour préserver le délai
+court et le comportement opportuniste. Seuls les résumés (identifiant, titre,
+description, pièce, catégorie, type et heure) passent par la gateway et le
+fournisseur du modèle ; les attributs bruts et les jetons de connexion
+Home Assistant ne sont pas envoyés.
 
 Jev est donc une amélioration opportuniste : son indisponibilité ne doit jamais
 vider la timeline ni empêcher l'affichage des événements.
@@ -311,7 +323,7 @@ pour savoir si Jev a effectivement rapproché des événements.
   notamment les événements enfants conservés et la stabilité quel que soit
   l'ordre d'entrée.
 - Toute modification des données envoyées à Jev doit rester côté serveur et ne
-  jamais exposer `JEV_TOKEN` au navigateur.
+  jamais exposer `AI_GATEWAY_API_KEY` au navigateur.
 
 ## Sources de vérité
 

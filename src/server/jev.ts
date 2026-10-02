@@ -1,34 +1,34 @@
-import { z } from "zod";
+import { createGateway, experimental_evaluate as evaluate } from "ai";
 import type { StoryIntent, TimelineEvent } from "../lib/types";
 
-const answerSchema = z.object({
-  type: z.string().optional(),
-  probability: z.number().min(0).max(1).optional(),
-  noul: z.number().min(0).max(1).optional(),
-});
-const responseSchema = z.object({
-  answers: z.record(z.string(), answerSchema),
-});
-const choiceResponseSchema = z.object({
-  answers: z.record(
-    z.string(),
-    z.object({
-      type: z.string().optional(),
-      choice: z.string().optional(),
-      probabilities: z.record(z.string(), z.number()).optional(),
-    }),
-  ),
-});
-const storyIntentSchema = z.enum([
-  "movie_start",
-  "welcome_home",
-  "welcome_home_with_door",
-  "lights_together",
-  "room_activity",
-  "automation_sequence",
-  "unclear",
-]);
 type Pair = { a: TimelineEvent; b: TimelineEvent };
+
+function evaluationModel(apiKey: string) {
+  return createGateway({
+    apiKey,
+    // Bound the response before the SDK buffers and validates its JSON.
+    fetch: async (input, init) => {
+      const response = await fetch(input, init);
+      if (!response.body) return response;
+      let bytes = 0;
+      const body = response.body.pipeThrough(
+        new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, controller) {
+            bytes += chunk.byteLength;
+            if (bytes > 256_000)
+              throw new Error("Jev response exceeded the size limit.");
+            controller.enqueue(chunk);
+          },
+        }),
+      );
+      return new Response(body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    },
+  }).evaluationModel(process.env.AI_GATEWAY_MODEL || "typesafe-ai/jev");
+}
 
 function pairKey(a: TimelineEvent, b: TimelineEvent) {
   return [a.id, b.id].sort().join("\n");
@@ -38,8 +38,10 @@ function summary(event: TimelineEvent) {
     id: event.id,
     at: event.timestamp,
     title: event.title,
-    description: event.description,
-    room: event.room?.name,
+    ...(event.description !== undefined
+      ? { description: event.description }
+      : {}),
+    ...(event.room ? { room: event.room.name } : {}),
     category: event.category,
     kind: event.kind,
   };
@@ -47,15 +49,15 @@ function summary(event: TimelineEvent) {
 
 export async function evaluateEventPairs(
   pairs: Pair[],
-  token = process.env.JEV_TOKEN,
+  apiKey = process.env.AI_GATEWAY_API_KEY,
 ) {
-  if (!token || !pairs.length) return new Map<string, boolean>();
+  if (!apiKey || !pairs.length) return new Map<string, boolean>();
   const questions = Object.fromEntries(
     pairs.map((_, index) => [
       `pair_${index}`,
       {
-        type: "noul",
-        instructions: `For pair ${index}, whose events are ${JSON.stringify(summary(pairs[index].a))} and ${JSON.stringify(summary(pairs[index].b))}: do these two home-activity events belong to the same short-lived human-readable moment? Say true only when they are meaningfully connected, not merely close in time.`,
+        type: "boolean" as const,
+        instructions: `For pair ${index} in the supplied state: do these two home-activity events belong to the same short-lived human-readable moment? Say true only when they are meaningfully connected, not merely close in time.`,
         criteria: {
           true: "They describe one coherent activity or transition and should be shown as one compact group.",
           false:
@@ -73,28 +75,18 @@ export async function evaluateEventPairs(
   const timer = setTimeout(() => controller.abort(), 1500);
   timer.unref();
   try {
-    const response = await fetch("https://api.typesafe.ai/v1/systemone", {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ model: "jev-latest", state, questions }),
-      signal: controller.signal,
+    const result = await evaluate({
+      model: evaluationModel(apiKey),
+      state,
+      questions,
+      maxRetries: 0,
+      abortSignal: controller.signal,
     });
-    if (!response.ok) return null;
-    const body = await response.text();
-    if (body.length > 256_000) return null;
-    const parsed = responseSchema.safeParse(JSON.parse(body));
-    if (!parsed.success) return null;
     return new Map(
-      pairs.flatMap((pair, index) => {
-        const answer = parsed.data.answers[`pair_${index}`];
-        const probability = answer?.probability ?? answer?.noul;
-        return probability !== undefined
-          ? [[pairKey(pair.a, pair.b), probability >= 0.8] as const]
-          : [];
-      }),
+      pairs.map((pair, index) => [
+        pairKey(pair.a, pair.b),
+        result.answers[`pair_${index}`].probability >= 0.8,
+      ]),
     );
   } catch {
     return null;
@@ -124,9 +116,9 @@ const storyIntents: Record<Exclude<StoryIntent, "unclear">, string> = {
 
 export async function evaluateEventGroupIntents(
   groups: { id: string; events: TimelineEvent[] }[],
-  token = process.env.JEV_TOKEN,
+  apiKey = process.env.AI_GATEWAY_API_KEY,
 ) {
-  if (!token || !groups.length) return new Map<string, StoryIntent>();
+  if (!apiKey || !groups.length) return new Map<string, StoryIntent>();
   const options = {
     ...storyIntents,
     unclear: "None of these descriptions fits confidently.",
@@ -135,7 +127,7 @@ export async function evaluateEventGroupIntents(
     groups.map((group, index) => [
       `group_${index}`,
       {
-        type: "choice",
+        type: "choice" as const,
         instructions: `Which predefined description best fits group ${index}? Choose unclear when the events do not clearly form one of the described moments.`,
         criteria: options,
       },
@@ -149,31 +141,22 @@ export async function evaluateEventGroupIntents(
   const timer = setTimeout(() => controller.abort(), 1500);
   timer.unref();
   try {
-    const response = await fetch("https://api.typesafe.ai/v1/systemone", {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ model: "jev-latest", state, questions }),
-      signal: controller.signal,
+    const result = await evaluate({
+      model: evaluationModel(apiKey),
+      state,
+      questions,
+      maxRetries: 0,
+      abortSignal: controller.signal,
     });
-    if (!response.ok) return null;
-    const body = await response.text();
-    if (body.length > 256_000) return null;
-    const parsed = choiceResponseSchema.safeParse(JSON.parse(body));
-    if (!parsed.success) return null;
     return new Map(
-      groups.flatMap((group, index) => {
-        const answer = parsed.data.answers[`group_${index}`];
-        const choice = storyIntentSchema.safeParse(answer?.choice);
-        const probability = choice.success
-          ? answer.probabilities?.[choice.data]
-          : undefined;
-        return choice.success &&
-          (probability === undefined || probability >= 0.75)
-          ? [[group.id, choice.data] as const]
-          : [[group.id, "unclear"] as const];
+      groups.map((group, index) => {
+        const answer = result.answers[`group_${index}`];
+        const probability = answer.probabilities?.[answer.choice];
+        const intent: StoryIntent =
+          probability === undefined || probability >= 0.75
+            ? answer.choice
+            : "unclear";
+        return [group.id, intent];
       }),
     );
   } catch {

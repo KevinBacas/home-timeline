@@ -23,6 +23,7 @@ Start with the module that owns the behavior being changed.
 | Summary derivation from current home state | `src/lib/home-summary.ts` |
 | Home Assistant transport, metadata, history ingestion | `src/server/adapter.ts` |
 | Connection lifecycle, history, evidence access | `src/server/runtime-core.ts` |
+| Optional Jev pair/intent evaluation through AI Gateway | `src/server/jev.ts`; orchestration and decision cache in `src/server/runtime-core.ts` |
 | Server-only entry point and development runtime reuse | `src/server/runtime.ts`, `src/server/shared-runtime.ts` |
 | Bounded observation retention and eviction | `src/server/store.ts` |
 | Payload sanitization and URL/Host/Origin validation | `src/lib/security.ts` |

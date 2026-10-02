@@ -119,7 +119,7 @@ export class HomeRuntime {
     void this.refreshJevGroups();
   };
   private async refreshJevGroups() {
-    if (!process.env.JEV_TOKEN || this.jevRefreshing) return;
+    if (!process.env.AI_GATEWAY_API_KEY || this.jevRefreshing) return;
     this.jevRefreshing = true;
     try {
       const end = Date.now();
@@ -160,7 +160,7 @@ export class HomeRuntime {
     }
   }
   private async refreshJevIntents() {
-    if (!process.env.JEV_TOKEN) return;
+    if (!process.env.AI_GATEWAY_API_KEY) return;
     const end = Date.now();
     const events = interpret(
       this.store.query(
@@ -207,7 +207,7 @@ export class HomeRuntime {
   }
   private jevStatus() {
     return {
-      configured: Boolean(process.env.JEV_TOKEN),
+      configured: Boolean(process.env.AI_GATEWAY_API_KEY),
       status: this.jevRefreshing
         ? ("evaluating" as const)
         : this.jevError

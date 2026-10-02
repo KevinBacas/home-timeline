@@ -2,7 +2,8 @@
 
 This is one TypeScript application, served by a persistent local Node.js process.
 The browser talks to local Next.js route handlers; the server talks to Home
-Assistant. The app has no database, hosted backend, or AI service.
+Assistant. The app has no database or hosted backend. Optional Jev evaluations
+use Vercel AI Gateway from the local server when an API key is configured.
 
 ## Main pieces
 
@@ -16,6 +17,7 @@ Assistant. The app has no database, hosted backend, or AI service.
 | Visuals | Lucide React, Motion, locally bundled Inter Variable | Icons, animation, and typography |
 | Time | `date-fns`, `date-fns-tz`, and `Intl` | Home-timezone range calculations and display |
 | External data | Zod | Validate and sanitize Home Assistant payloads and connection input |
+| Optional AI grouping | Vercel AI SDK 7 and AI Gateway | Evaluate nearby event pairs and story intents with `typesafe-ai/jev`; requires Node.js 22+ |
 | Home Assistant transport | Native `fetch` and `ws` | REST history/metadata and live WebSocket subscriptions |
 | Browser updates | HTTP queries and `@tanstack/react-query` | Visibility-aware polling, request sharing, cancellation, and in-memory caching |
 | Quality tools | `node:test`, `node:assert/strict`, `tsx`, TypeScript, Prettier | Tests, type checking, and formatting |
